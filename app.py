@@ -170,18 +170,46 @@ label, .stSelectbox label, .stNumberInput label {
 </style>
 """, unsafe_allow_html=True)
 
-# ── Load model & scaler ───────────────────────────────────────────────────────
+# ── Load model & scaler (train on-the-fly if pkl files are missing) ───────────
 @st.cache_resource
 def load_artifacts():
-    model  = joblib.load("knn_model.pkl")
-    scaler = joblib.load("scaler.pkl")
+    import os, pandas as pd
+    from sklearn.model_selection import train_test_split
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.neighbors import KNeighborsClassifier
+
+    model_path  = "knn_model.pkl"
+    scaler_path = "scaler.pkl"
+
+    if os.path.exists(model_path) and os.path.exists(scaler_path):
+        model  = joblib.load(model_path)
+        scaler = joblib.load(scaler_path)
+    else:
+        # Auto-train from CSV (used on Streamlit Cloud where pkl files aren't committed)
+        df = pd.read_csv("cancer_data.csv")
+        X  = df.drop("diagnosis", axis=1)
+        y  = df["diagnosis"]
+
+        X_train, _, y_train, _ = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+
+        scaler  = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+
+        model = KNeighborsClassifier(n_neighbors=5)
+        model.fit(X_train, y_train)
+
+        # Save for future runs (local)
+        try:
+            joblib.dump(model,  model_path)
+            joblib.dump(scaler, scaler_path)
+        except Exception:
+            pass   # read-only filesystem on cloud — that's fine
+
     return model, scaler
 
-try:
-    model, scaler = load_artifacts()
-except FileNotFoundError:
-    st.error("❌ Model files not found! Run `python3 generate_model.py` first.")
-    st.stop()
+model, scaler = load_artifacts()
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.markdown("""
